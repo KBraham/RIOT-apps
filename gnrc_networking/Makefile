@@ -2,16 +2,16 @@
 APPLICATION = gnrc_networking
 
 # If no BOARD is found in the environment, use this default:
-BOARD ?= maple-mini
+BOARD ?= nucleo-f401
 
 # This has to be the absolute path to the RIOT base directory:
-RIOTBASE ?= $(CURDIR)/../../RIOT
+RIOTBASE ?= $(CURDIR)/../../RIOT/
 
 BOARD_INSUFFICIENT_MEMORY := airfy-beacon chronos msb-430 msb-430h nrf51dongle \
                           nrf6310 nucleo-f103 nucleo-f334 pca10000 pca10005 spark-core \
                           stm32f0discovery telosb weio wsn430-v1_3b wsn430-v1_4 \
                           yunjia-nrf51822 z1 nucleo-f072 nucleo-f030 nucleo-f070 \
-                          microbit calliope-mini nucleo-f042
+                          microbit calliope-mini nucleo32-f042 nucleo32-f303
 
 # Include packages that pull up and auto-init the link layer.
 # NOTE: 6LoWPAN will be included if IEEE802.15.4 devices are present
@@ -31,12 +31,30 @@ USEMODULE += gnrc_icmpv6_echo
 USEMODULE += shell
 USEMODULE += shell_commands
 USEMODULE += ps
-#USEMODULE += netstats_l2
-#USEMODULE += netstats_ipv6
-#USEMODULE += netstats_rpl
+USEMODULE += netstats_l2
+USEMODULE += netstats_ipv6
+USEMODULE += netstats_rpl
+
+# mrf24j40
 USEMODULE += mrf24j40
 
-CFLAGS += -DGNRC_PKTBUF_SIZE=2048
+# Saul
+USEMODULE += saul_reg
+#USEMODULE += saul_default
+#USEMODULE += saul_gpio
+USEMODULE += auto_init_saul
+
+# bme280
+USEMODULE += bme280
+
+# set default device parameters in case they are undefined
+TEST_I2C                  ?= I2C_0
+TEST_I2C_ADDR             ?= 0x76
+
+# export parameters
+CFLAGS += -DBME280_PARAM_I2C_DEV=$(TEST_I2C)
+CFLAGS += -DBME280_PARAM_I2C_ADDR=$(TEST_I2C_ADDR)
+
 
 # Comment this out to disable code in RIOT that does safety checking
 # which is not needed in a production environment but helps in the

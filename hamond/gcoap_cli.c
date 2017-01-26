@@ -22,23 +22,28 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "net/gnrc/coap.h"
+#include <math.h>
+#include "net/gcoap.h"
 #include "od.h"
 #include "fmt.h"
 #include "saul_reg.h"
 #include "saul.h"
 
+
 static void _resp_handler(unsigned req_state, coap_pkt_t* pdu);
 static ssize_t _stats_handler(coap_pkt_t* pdu, uint8_t *buf, size_t len);
-static ssize_t _saul_handler_0(coap_pkt_t* pdu, uint8_t *buf, size_t len);
-static ssize_t _saul_handler_1(coap_pkt_t* pdu, uint8_t *buf, size_t len);
+static ssize_t _bme_temp_0(coap_pkt_t* pdu, uint8_t *buf, size_t len);
+static ssize_t _bme_humidity_0(coap_pkt_t* pdu, uint8_t *buf, size_t len);
+static ssize_t _bme_press_0(coap_pkt_t* pdu, uint8_t *buf, size_t len);
 
 /* CoAP resources */
 static const coap_resource_t _resources[] = {
     { "/cli/stats", COAP_GET, _stats_handler },
-    { "/saul/0", COAP_PUT, _saul_handler_0 },
-    { "/saul/1", COAP_GET, _saul_handler_1 },
+    { "/saul/humidity/0", COAP_GET, _bme_humidity_0 },
+    { "/saul/pressure/0", COAP_GET, _bme_press_0 },
+    { "/saul/temp/0", COAP_GET, _bme_temp_0 },
 };
+
 static gcoap_listener_t _listener = {
     (coap_resource_t *)&_resources[0],
     sizeof(_resources) / sizeof(_resources[0]),
@@ -48,6 +53,43 @@ static gcoap_listener_t _listener = {
 /* Counts requests sent by CLI. */
 static uint16_t req_count = 0;
 
+/*
+ * Server callback for /saul/temp/0
+ */
+static ssize_t _bme_temp_0(coap_pkt_t* pdu, uint8_t *buf, size_t len)
+{
+    phydat_t phy;
+    gcoap_resp_init(pdu, buf, len, COAP_CODE_CONTENT);
+    saul_reg_read(saul_reg_find_nth(0), &phy);
+    size_t payload_len = fmt_s16_dfp((char *)pdu->payload, phy.val[0],2);
+    return gcoap_finish(pdu, payload_len, COAP_FORMAT_TEXT);
+}
+
+/*
+ * Server callback for /saul/humidity/0
+ */
+static ssize_t _bme_humidity_0(coap_pkt_t* pdu, uint8_t *buf, size_t len)
+{
+    phydat_t phy;
+    gcoap_resp_init(pdu, buf, len, COAP_CODE_CONTENT);
+    saul_reg_read(saul_reg_find_nth(1), &phy);
+    size_t payload_len = fmt_s16_dfp((char *)pdu->payload, phy.val[0],2);
+    return gcoap_finish(pdu, payload_len, COAP_FORMAT_TEXT);
+}
+/*
+ * Server callback for /saul/press/0
+ */
+static ssize_t _bme_press_0(coap_pkt_t* pdu, uint8_t *buf, size_t len)
+{
+    phydat_t phy;
+    gcoap_resp_init(pdu, buf, len, COAP_CODE_CONTENT);
+    // Read temp before pressure
+    saul_reg_read(saul_reg_find_nth(0), &phy);
+    saul_reg_read(saul_reg_find_nth(2), &phy);
+    uint32_t t = phy.val[0]*pow(10,phy.scale);
+    size_t payload_len = fmt_u32_dec((char *)pdu->payload, t);
+    return gcoap_finish(pdu, payload_len, COAP_FORMAT_TEXT);
+}
 /*
  * Response callback.
  */
@@ -86,37 +128,6 @@ static void _resp_handler(unsigned req_state, coap_pkt_t* pdu)
     }
 }
 
-static ssize_t _saul_handler_0(coap_pkt_t* pdu, uint8_t *buf, size_t len)
-{
-    /* Process input */
-    phydat_t phy;
-
-    phy.val[0] = scn_u32_dec((char *)&pdu->payload[0],1);
-    phy.scale = 0;
-    phy.unit = UNIT_NONE;
-
-    saul_reg_write (saul_reg_find_nth(0), &phy);
-
-    /* Generate response */
-    gcoap_resp_init(pdu, buf, len, COAP_CODE_CONTENT);
-    saul_reg_read (saul_reg_find_nth(0), &phy);
-    
-    size_t payload_len = fmt_u32_dec((char *)pdu->payload, phy.val[0]);
-
-    return gcoap_finish(pdu, payload_len, COAP_FORMAT_TEXT);;
-}
-
-static ssize_t _saul_handler_1(coap_pkt_t* pdu, uint8_t *buf, size_t len)
-{
-    phydat_t phy;
-
-    gcoap_resp_init(pdu, buf, len, COAP_CODE_CONTENT);
-    saul_reg_read (saul_reg_find_nth(1), &phy);
-    size_t payload_len = fmt_u32_dec((char *)pdu->payload, phy.val[0]);
-
-    return gcoap_finish(pdu, payload_len, COAP_FORMAT_TEXT);;
-}
-
 /*
  * Server callback for /cli/stats. Returns the count of packets sent by the
  * CLI.
@@ -133,22 +144,27 @@ static ssize_t _stats_handler(coap_pkt_t* pdu, uint8_t *buf, size_t len)
 static size_t _send(uint8_t *buf, size_t len, char *addr_str, char *port_str)
 {
     ipv6_addr_t addr;
-    uint16_t port;
     size_t bytes_sent;
+    sock_udp_ep_t remote;
+
+    remote.family = AF_INET6;
+    remote.netif  = SOCK_ADDR_ANY_NETIF;
 
     /* parse destination address */
     if (ipv6_addr_from_str(&addr, addr_str) == NULL) {
         puts("gcoap_cli: unable to parse destination address");
         return 0;
     }
+    memcpy(&remote.addr.ipv6[0], &addr.u8[0], sizeof(addr.u8));
+
     /* parse port */
-    port = (uint16_t)atoi(port_str);
-    if (port == 0) {
+    remote.port = (uint16_t)atoi(port_str);
+    if (remote.port == 0) {
         puts("gcoap_cli: unable to parse destination port");
         return 0;
     }
 
-    bytes_sent = gcoap_req_send(buf, len, &addr, port, _resp_handler);
+    bytes_sent = gcoap_req_send2(buf, len, &remote, _resp_handler);
     if (bytes_sent > 0) {
         req_count++;
     }
