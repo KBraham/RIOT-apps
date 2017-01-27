@@ -77,13 +77,13 @@ USEMODULE += bme280
 TEST_I2C                  ?= I2C_0
 TEST_I2C_ADDR             ?= 0x76
 
-# Set PAN_ID
-DEFAULT_PAN_ID ?= 0xa9f7U
-CFLAGS += -DIEEE802154_DEFAULT_PANID=$(DEFAULT_PAN_ID)
-
 # export parameters
 CFLAGS += -DBME280_PARAM_I2C_DEV=$(TEST_I2C)
 CFLAGS += -DBME280_PARAM_I2C_ADDR=$(TEST_I2C_ADDR)
+
+# Set PAN_ID
+DEFAULT_PAN_ID ?= 0xa9f7U
+CFLAGS += -DIEEE802154_DEFAULT_PANID=$(DEFAULT_PAN_ID)
 
 # Comment this out to join RPL DODAGs even if DIOs do not contain
 # DODAG Configuration Options (see the doc for more info)
